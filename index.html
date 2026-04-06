@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>學長姐抽籤系統</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --accent-color: #007aff;
+            --text-main: #1d1d1f;
+            --text-sub: #86868b;
+            --shadow: 0 10px 40px rgba(0,0,0,0.05);
+            --radius: 24px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 280px 400px 280px;
+            gap: 20px;
+            max-width: 1050px;
+            width: 100%;
+        }
+
+        .box {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Bento Layout Specifics */
+        .header-box { grid-column: span 3; text-align: center; padding: 30px; }
+        .selection-box { grid-row: span 1; gap: 10px; }
+        .wheel-box { grid-row: span 1; align-items: center; justify-content: center; position: relative; }
+        .result-box { grid-row: span 1; }
+
+        h2 { font-size: 1.5rem; margin-bottom: 5px; font-weight: 700; }
+        p.desc { color: var(--text-sub); font-size: 0.9rem; margin-bottom: 20px; }
+
+        /* Mentor Buttons */
+        .mentor-btn {
+            background: #fdfdfd;
+            border: 1px solid #eee;
+            padding: 16px;
+            border-radius: 16px;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 600;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .mentor-btn:hover { transform: translateY(-2px); border-color: var(--accent-color); }
+        .mentor-btn.selected { background: var(--accent-color); color: white; border-color: var(--accent-color); box-shadow: 0 4px 15px rgba(0,122,255,0.3); }
+        .mentor-btn.disabled { opacity: 0.2; pointer-events: none; filter: grayscale(1); }
+
+        /* Wheel Styles */
+        .wheel-container {
+            position: relative;
+            width: 340px;
+            height: 340px;
+            margin: 20px 0;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            /* 旋轉動畫的核心：使用轉化與順暢的貝茲曲線 */
+            transition: transform 5s cubic-bezier(0.15, 0, 0.15, 1);
+        }
+
+        /* 指針：固定在正上方 */
+        .pointer {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 24px;
+            height: 40px;
+            background: #ff3b30;
+            clip-path: polygon(50% 100%, 0 0, 100% 0);
+            z-index: 10;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
+        }
+
+        .spin-btn {
+            background: var(--text-main);
+            color: white;
+            border: none;
+            padding: 14px 40px;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        .spin-btn:disabled { background: #d2d2d7; cursor: not-allowed; transform: none; }
+        .spin-btn:active { transform: scale(0.95); }
+
+        /* Result List */
+        .result-item {
+            padding: 12px;
+            background: #f9f9fb;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+            border-left: 4px solid var(--accent-color);
+            animation: slideIn 0.4s ease-out forwards;
+        }
+        @keyframes slideIn { from { opacity:0; transform:translateX(10px); } to { opacity:1; transform:translateX(0); } }
+
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+            .header-box { grid-column: span 1; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="box header-box">
+        <h2>學員配對轉盤</h2>
+        <p class="desc">請點選左側學長姐，啟動專屬配對邏輯</p>
+    </div>
+
+    <div class="box selection-box" id="mentorContainer">
+        <div class="mentor-btn" data-name="王鵬喆">王鵬喆 (學長)</div>
+        <div class="mentor-btn" data-name="Kokokrunch">Kokokrunch (學姐)</div>
+        <div class="mentor-btn" data-name="陳柏霖">陳柏霖 (學長)</div>
+        <div class="mentor-btn" data-name="Ethan">Ethan (學長)</div>
+    </div>
+
+    <div class="box wheel-box">
+        <div class="pointer"></div>
+        <div class="wheel-container">
+            <canvas id="wheelCanvas" width="800" height="800"></canvas>
+        </div>
+        <button class="spin-btn" id="spinBtn" disabled>啟動轉盤</button>
+    </div>
+
+    <div class="box result-box">
+        <h3 style="margin-bottom:15px; font-size:1.1rem;">配對成功名單</h3>
+        <div id="resultContainer"></div>
+    </div>
+</div>
+
+<script>
+    // 1. 設定後台固定邏輯
+    const PAIRING_LOGIC = {
+        "王鵬喆": ["廖可晴"],
+        "Kokokrunch": ["陳巧恩"],
+        "陳柏霖": ["李彥承", "李芃飛"],
+        "Ethan": ["李彥承", "男6"]
+    };
+
+    let availableJuniors = ["廖可晴", "陳巧恩", "李彥承", "李芃飛"];
+    let currentSelectedMentor = null;
+    let isSpinning = false;
+    let currentRotation = 0; // 紀錄當前角度，避免轉盤每次都歸零
+
+    const canvas = document.getElementById('wheelCanvas');
+    const ctx = canvas.getContext('2d');
+    const spinBtn = document.getElementById('spinBtn');
+
+    // 初始化學長姐按鈕
+    document.querySelectorAll('.mentor-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (isSpinning) return;
+            document.querySelectorAll('.mentor-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            currentSelectedMentor = btn.dataset.name;
+            spinBtn.disabled = false;
+        });
+    });
+
+    function drawWheel() {
+        const count = availableJuniors.length;
+        if (count === 0) return;
+        const arcSize = (2 * Math.PI) / count;
+
+        ctx.clearRect(0, 0, 800, 800);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "bold 44px sans-serif";
+
+        availableJuniors.forEach((name, i) => {
+            const angle = i * arcSize;
+            
+            // 繪製扇形
+            ctx.beginPath();
+            ctx.fillStyle = i % 2 === 0 ? "#ffffff" : "#f2f2f7";
+            ctx.moveTo(400, 400);
+            ctx.arc(400, 400, 380, angle, angle + arcSize);
+            ctx.fill();
+            ctx.strokeStyle = "#e5e5ea";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 繪製文字
+            ctx.save();
+            ctx.translate(400, 400);
+            ctx.rotate(angle + arcSize / 2);
+            ctx.fillStyle = "#1d1d1f";
+            ctx.fillText(name, 220, 0);
+            ctx.restore();
+        });
+    }
+
+    spinBtn.addEventListener('click', () => {
+        if (isSpinning || !currentSelectedMentor) return;
+
+        // 決定結果 (偽隨機鎖定)
+        const targets = PAIRING_LOGIC[currentSelectedMentor].filter(name => availableJuniors.includes(name));
+        const finalTarget = targets[Math.floor(Math.random() * targets.length)];
+        const targetIndex = availableJuniors.indexOf(finalTarget);
+
+        isSpinning = true;
+        spinBtn.disabled = true;
+
+        // --- 精準角度計算 ---
+        const segmentDeg = 360 / availableJuniors.length;
+        
+        /* 邏輯說明：
+           1. Canvas 繪圖 0 度在 3 點鐘方向。
+           2. 指針在 12 點鐘方向 (-90度)。
+           3. 目標區塊的中點角度為：(targetIndex * segmentDeg) + (segmentDeg / 2)
+           4. 轉盤需要旋轉的度數 = (多轉幾圈) + (修正指針位置與目標區塊的相對度數)
+        */
+        const targetMidAngle = (targetIndex * segmentDeg) + (segmentDeg / 2);
+        const rotationToTop = 360 - targetMidAngle - 90; 
+        
+        // 增加 10 圈旋轉動畫 (3600度)
+        const additionalSpins = 3600;
+        currentRotation += additionalSpins + (rotationToTop - (currentRotation % 360) + 360) % 360;
+
+        canvas.style.transform = `rotate(${currentRotation}deg)`;
+
+        // 動畫結束
+        setTimeout(() => {
+            // 紀錄結果
+            const resDiv = document.createElement('div');
+            resDiv.className = 'result-item';
+            resDiv.innerHTML = `<strong>${currentSelectedMentor}</strong> ➔ <strong>${finalTarget}</strong>`;
+            document.getElementById('resultContainer').prepend(resDiv);
+
+            // 更新名單
+            availableJuniors = availableJuniors.filter(n => n !== finalTarget);
+            
+            // 禁用已選過的學長姐
+            const btn = document.querySelector(`.mentor-btn[data-name="${currentSelectedMentor}"]`);
+            btn.classList.remove('selected');
+            btn.classList.add('disabled');
+
+            // 重置狀態
+            isSpinning = false;
+            currentSelectedMentor = null;
+            drawWheel(); 
+
+            if (availableJuniors.length === 0) {
+                setTimeout(() => alert(" 所有配對已完成！"), 300);
+            }
+        }, 5100); // 略多於 CSS transition 的 5s
+    });
+
+    drawWheel();
+</script>
+
+</body>
+</html>
